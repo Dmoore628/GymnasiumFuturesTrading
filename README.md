@@ -1,4 +1,6 @@
-﻿# GymnasiumFuturesTrading
+# Gymnasium Trading Env with pre-purchased price data
+```python
+"""
 Simple Trading Data Visualization Environment
 ============================================
 
@@ -14,7 +16,6 @@ import matplotlib.pyplot as plt
 
 class TradingDataEnv(gym.Env):
     """Custom environment for visualizing trading data"""
-    
     def __init__(self, csv_path, window_size=50):
         super().__init__()
         
@@ -29,7 +30,8 @@ class TradingDataEnv(gym.Env):
             raise ValueError("Data is not sorted chronologically")
         
         # Validate data columns
-        required_columns = ['Date', 'Open', 'High', 'Low', 'Close']
+        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 
+                          '5EMA', '144EMA', 'BOLLBU', 'BOLLBM', 'BOLLBL']
         if not all(col in self.data.columns for col in required_columns):
             raise ValueError(f"CSV must contain columns: {required_columns}")
         
@@ -118,6 +120,21 @@ class TradingDataEnv(gym.Env):
                 linewidth=4
             )
             
+        # Plot technical indicators
+        self.ax.plot(dates, self.data.iloc[start_idx:end_idx]['5EMA'].values, 
+                    color='blue', linewidth=1, label='5EMA')
+        self.ax.plot(dates, self.data.iloc[start_idx:end_idx]['144EMA'].values, 
+                    color='orange', linewidth=1, label='144EMA')
+        self.ax.plot(dates, self.data.iloc[start_idx:end_idx]['BOLLBU'].values, 
+                    color='purple', linewidth=1, linestyle='--', label='BOLLBU')
+        self.ax.plot(dates, self.data.iloc[start_idx:end_idx]['BOLLBM'].values, 
+                    color='gray', linewidth=1, linestyle='--', label='BOLLBM')
+        self.ax.plot(dates, self.data.iloc[start_idx:end_idx]['BOLLBL'].values, 
+                    color='purple', linewidth=1, linestyle='--', label='BOLLBL')
+        
+        # Add legend
+        self.ax.legend(loc='upper left')
+            
         # Format x-axis
         self.ax.set_title(f'Step {self.current_step}')
         self.ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%H:%M'))
@@ -146,4 +163,5 @@ if __name__ == "__main__":
             observation, info = env.reset()
             
     env.close()
+```
 
