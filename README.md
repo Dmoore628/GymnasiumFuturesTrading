@@ -1,2 +1,150 @@
 ﻿# GymnasiumFuturesTrading
+"""
+Simple Trading Data Visualization Environment
+============================================
+
+This environment demonstrates loading and visualizing trading data from a CSV file.
+It steps through the data with no-op actions, showing how the data changes over time.
+"""
+
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+class TradingDataEnv(gym.Env):
+    """Custom environment for visualizing trading data"""
+    
+    def __init__(self, csv_path, window_size=50):
+        super().__init__()
+        
+        # Load CSV data, parse dates, and sort
+        self.data = pd.read_csv(csv_path, parse_dates=['Date'])
+        self.data.sort_values('Date', inplace=True)
+        self.data.reset_index(drop=True, inplace=True)
+        self.current_step = 0
+        
+        # Verify data is sorted correctly
+        if not self.data['Date'].is_monotonic_increasing:
+            raise ValueError("Data is not sorted chronologically")
+        
+        # Validate data columns
+        required_columns = ['Date', 'Open', 'High', 'Low', 'Close']
+        if not all(col in self.data.columns for col in required_columns):
+            raise ValueError(f"CSV must contain columns: {required_columns}")
+        
+        # Define observation space (9 float features)
+        self.observation_space = spaces.Box(
+            low=-np.inf, 
+            high=np.inf,
+            shape=(9,),
+            dtype=np.float32
+        )
+        
+        # Define action space (no-op only)
+        self.action_space = spaces.Discrete(1)
+        
+        # Visualization setup
+        self.fig, self.ax = plt.subplots(figsize=(10, 6))
+        plt.ion()  # Enable interactive mode
+        
+        # Window size for visualization
+        self.window_size = window_size
+        
+    def _get_observation(self):
+        """Get current observation from data"""
+        row = self.data.iloc[self.current_step, 1:]  # Skip date column
+        return row.values.astype(np.float32)
+    
+    def reset(self, seed=None, options=None):
+        """Reset the environment to initial state"""
+        super().reset(seed=seed)
+        self.current_step = 0
+        observation = self._get_observation()
+        info = {}
+        return observation, info
+    
+    def step(self, action):
+        """Take a step through the data"""
+        self.current_step += 1
+        
+        # Check if done
+        terminated = self.current_step >= len(self.data) - 1
+        truncated = False
+        
+        # Get current observation
+        observation = self._get_observation()
+        
+        # No reward since this is just visualization
+        reward = 0.0
+        
+        # Update visualization
+        self._render_frame()
+        
+        return observation, reward, terminated, truncated, {}
+    
+    def _render_frame(self):
+        """Update the visualization with candlestick chart"""
+        if self.fig is None:
+            self.fig, self.ax = plt.subplots(figsize=(12, 6))
+            self.ax.xaxis_date()
+            
+        self.ax.clear()
+        
+        # Get window of data to display
+        start_idx = max(0, self.current_step - self.window_size)
+        end_idx = self.current_step + 1
+        
+        # Prepare candlestick data with proper date handling
+        dates = self.data.iloc[start_idx:end_idx, 0].values
+        opens = self.data.iloc[start_idx:end_idx, 1].values
+        highs = self.data.iloc[start_idx:end_idx, 2].values
+        lows = self.data.iloc[start_idx:end_idx, 3].values
+        closes = self.data.iloc[start_idx:end_idx, 4].values
+        
+        # Plot candlesticks using proper indexing
+        for idx in range(len(dates)):
+            color = 'green' if closes[idx] >= opens[idx] else 'red'
+            self.ax.plot(
+                [dates[idx], dates[idx]],
+                [lows[idx], highs[idx]],
+                color=color,
+                linewidth=1
+            )
+            self.ax.plot(
+                [dates[idx], dates[idx]],
+                [opens[idx], closes[idx]],
+                color=color,
+                linewidth=4
+            )
+            
+        # Format x-axis
+        self.ax.set_title(f'Step {self.current_step}')
+        self.ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%H:%M'))
+        self.fig.autofmt_xdate()
+        
+        plt.pause(0.01)  # Pause to update display
+        
+    def close(self):
+        """Clean up visualization"""
+        plt.close(self.fig)
+
+if __name__ == "__main__":
+    # Create and run the environment
+    env = TradingDataEnv(
+        csv_path="data/test/TESTCOMMAFREEcleanedNQ1minCandleData.csv",
+        window_size=100
+    )
+    
+    observation, info = env.reset()
+    
+    for _ in range(1000):  # Run for 1000 steps
+        action = 0  # No-op action
+        observation, reward, terminated, truncated, info = env.step(action)
+        
+        if terminated or truncated:
+            observation, info = env.reset()
+            
+    env.close()
 
