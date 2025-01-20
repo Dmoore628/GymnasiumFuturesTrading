@@ -1,5 +1,4 @@
 ﻿# GymnasiumFuturesTrading
-"""
 Simple Trading Data Visualization Environment
 ============================================
 
