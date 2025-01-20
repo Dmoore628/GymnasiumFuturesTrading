@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 
 class TradingDataEnv(gym.Env):
     """Custom environment for visualizing trading data"""
+    
     def __init__(self, csv_path, window_size=50):
         super().__init__()
         
@@ -163,5 +164,6 @@ if __name__ == "__main__":
             observation, info = env.reset()
             
     env.close()
+
 ```
 
