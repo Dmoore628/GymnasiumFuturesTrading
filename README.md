@@ -1,296 +1,280 @@
-# Gymnasium Trading Env with pre-purchased price data
-```python
-"""
-Simple Trading Data Visualization Environment
-============================================
+# TradingDataEnv Prototype
+```rl_env_prototype.py``` contains the TradingDataEnv class, a custom OpenAI Gym environment designed for visualizing and interacting with trading data. This environment facilitates the development and testing of reinforcement learning algorithms aimed at trading strategies by providing a structured and interactive platform to simulate and analyze trading actions based on pre-purchased historical market data.
+The TradingDataEnv class serves as a specialized environment for reinforcement learning applications in futures trading. It allows developers to train and evaluate algorithms by visualizing trading data, simulating trading actions, and tracking the performance of strategies over defined weekly intervals. By leveraging historical OHLC (Open, High, Low, Close) data along with precomputed indicators, this environment offers the beginnings of a comprehensive framework for developing robust trading models.
 
-This environment demonstrates loading and visualizing trading data from a CSV file.
-It steps through the data with no-op actions, showing how the data changes over time.
-"""
 
-import os
-import gymnasium as gym
-from gymnasium import spaces
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import torch
+## Features
+ * **Data Loading and Processing**: Automatically loads and preprocesses weekly trading data from a CSV file, ensuring data integrity and proper formatting.
+ * **Custom Observation Space**: Defines an observation space with 11 float features, including market indicators and temporal information.
+ * **Action Space**: Currently supports a no-operation (no-op) action, serving as a foundation for expanding trading actions.
+ * **Visualization**: Integrates Matplotlib for real-time visualization of trading data, including candlestick charts and key indicators.
+ * **Configurable Parameters**: Allows customization of visualization window size and the number of weeks of data to load.
+ * **Model Saving**: Supports saving model states after completing the defined number of passes through the data.
+ * **Error Handling**: Implements robust error handling to manage data inconsistencies and rendering issues.
 
-class TradingDataEnv(gym.Env):
-    """Custom environment for visualizing trading data"""
-    
-    def __init__(self, csv_path, window_size=50, num_weeks=None):
-        super().__init__()
-        
-        # Load and process weekly data immediately
-        self.weeks = self._load_and_process_weekly_data(csv_path)
-        if num_weeks is not None:
-            self.weeks = self.weeks[:num_weeks]
-            
-        self.current_week = 0
-        self.current_step = 0
-        self.current_week_data = self.weeks[self.current_week]['data']
-        
-        # Define observation space (11 float features)
-        self.observation_space = spaces.Box(
-            low=-np.inf, 
-            high=np.inf,
-            shape=(11,),
-            dtype=np.float32
-        )
-        
-        # Define action space (no-op only)
-        self.action_space = spaces.Discrete(1)
-        
-        # Visualization setup
-        self.fig, self.ax = plt.subplots(figsize=(10, 6))
-        plt.ion()  # Enable interactive mode
-        
-        # Window size for visualization
-        self.window_size = window_size
-        
-        # Week completion tracking
-        self.week_passes = 0
-        self.required_passes = 2
-        
-        # Model saving setup
-        self.models_dir = "models"
-        if not os.path.exists(self.models_dir):
-            os.makedirs(self.models_dir)
 
-    def _load_and_process_weekly_data(self, csv_path):
-        """Load CSV and process into weekly chunks immediately"""
-        data = pd.read_csv(csv_path, parse_dates=['Date'])
-        data.sort_values('Date', inplace=True)
-        data.reset_index(drop=True, inplace=True)
-        
-        # Validate data columns
-        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 
-                          '5EMA', '144EMA', 'BOLLBU', 'BOLLBM', 'BOLLBL']
-        if not all(col in data.columns for col in required_columns):
-            raise ValueError(f"CSV must contain columns: {required_columns}")
-            
-        # Define exact week start dates
-        week_starts = [
-            pd.Timestamp('2024-09-29 17:00:00'),
-            pd.Timestamp('2024-10-06 17:00:00'),
-            pd.Timestamp('2024-10-13 17:00:00'),
-            pd.Timestamp('2024-10-20 17:00:00'),
-            pd.Timestamp('2024-10-27 17:00:00'),
-            pd.Timestamp('2024-11-03 17:00:00'),
-            pd.Timestamp('2024-11-10 17:00:00')
-        ]
-        
-        weeks = []
-        for i, start_date in enumerate(week_starts):
-            # Calculate end date (Friday 15:59:00)
-            end_date = start_date + pd.Timedelta(days=5) - pd.Timedelta(minutes=1)
-            
-            # Filter data for this week
-            week_data = data[(data['Date'] >= start_date) & (data['Date'] <= end_date)]
-            
-            # Validate week length with tolerance
-            obs_count = len(week_data)
-            if obs_count < 6895 or obs_count > 6900:
-                raise ValueError(f"Week {i+1} has {obs_count} observations (expected 6895-6900)")
-                
-            if obs_count != 6900:
-                print(f"Warning: Week {i+1} has {obs_count} observations (expected 6900)")
-            else:
-                print(f"Week {i+1}: {obs_count} observations")
-            weeks.append({
-                'number': i + 1,
-                'start_date': start_date,
-                'end_date': end_date,
-                'data': week_data
-            })
-            
-        return weeks
+## Prerequisites
+Ensure the following Python packages are installed:
+ * Python 3.7+
+ * NumPy (```numpy```)
+ * Pandas (```pandas```)
+ * Matplotlib (```matplotlib```)
+ * OpenAI Gym (```gym```)
+ * PyTorch (```torch```)
+ * os
 
-    def _get_observation(self):
-        """Get current observation from weekly data"""
-        row = self.current_week_data.iloc[self.current_step, 1:]  # Skip date column
-        obs = row.values.astype(np.float32)
-        
-        # Add day of week (0=Monday, 6=Sunday)
-        current_date = self.current_week_data.iloc[self.current_step, 0]
-        day_of_week = current_date.weekday()  # Monday=0, Sunday=6
-        
-        # Add week progress (0.0-1.0)
-        week_progress = self.current_step / len(self.current_week_data)
-        
-        # Combine all features
-        return np.append(obs, [day_of_week, week_progress])
-    
-    def reset(self, seed=None, options=None):
-        """Reset the environment to initial state"""
-        super().reset(seed=seed)
-        self.current_week = 0
-        self.current_step = 0
-        self.week_completion_count = 0
-        self.current_week_data = self.weeks[self.current_week]['data']
-        
-        observation = self._get_observation()
-        info = {
-            'week_number': self.weeks[self.current_week]['number'],
-            'week_start': self.weeks[self.current_week]['start_date'],
-            'week_end': self.weeks[self.current_week]['end_date'],
-            'week_progress': self.current_step / len(self.current_week_data)
-        }
-        return observation, info
-    
-    def step(self, action):
-        """Take a step through the data"""
-        self.current_step += 1
-        
-        # Check if current week is done
-        terminated = self.current_step >= len(self.current_week_data) - 1
-        
-        # If week is done, increment pass counter
-        if terminated:
-            self.week_passes += 1
-            
-            # Only advance to next week after required passes
-            if self.week_passes >= self.required_passes:
-                self.current_week += 1
-                self.week_passes = 0  # Reset pass counter
-                
-                if self.current_week >= len(self.weeks):
-                    terminated = True
-                    # Save model after final week
-                    model_path = os.path.join(self.models_dir, f"week{self.current_week}_model.pth")
-                    torch.save({
-                        'week': self.current_week,
-                        'state_dict': self.model.state_dict() if hasattr(self, 'model') else {},
-                        'passes': self.week_passes
-                    }, model_path)
-                    print(f"\nTraining complete! Model saved to {model_path}")
-                else:
-                    self.current_step = 0
-                    self.current_week_data = self.weeks[self.current_week]['data']
-                    print(f"\nStarting Week {self.current_week + 1} with {len(self.current_week_data)} observations")
-                    terminated = False
-            else:
-                # Reset for another pass through current week
-                self.current_step = 0
-                print(f"\nStarting pass {self.week_passes + 1} of Week {self.current_week + 1}")
-                terminated = False
-        
-        # Get current observation
-        observation = self._get_observation()
-        
-        # No reward since this is just visualization
-        reward = 0.0
-        
-        # Update visualization
-        self._render_frame()
-        
-        info = {
-            'week_number': self.weeks[self.current_week]['number'],
-            'week_start': self.weeks[self.current_week]['start_date'],
-            'week_end': self.weeks[self.current_week]['end_date'],
-            'current_step': self.current_step,
-            'week_passes': self.week_passes
-        }
-        
-        return observation, reward, terminated, False, info
-    
-    def _render_frame(self):
-        """Update the visualization with candlestick chart"""
-        try:
-            # Initialize figure if needed
-            if self.fig is None:
-                self.fig, self.ax = plt.subplots(figsize=(12, 6))
-                self.ax.xaxis_date()
-            
-            self.ax.clear()
-            
-            # Get window of data to display
-            start_idx = max(0, self.current_step - self.window_size)
-            end_idx = self.current_step + 1
-            
-            # Prepare candlestick data with proper date handling
-            date_col = pd.to_datetime(self.current_week_data.iloc[start_idx:end_idx, 0])
-            dates = date_col.values
-            opens = self.current_week_data.iloc[start_idx:end_idx, 1].values
-            highs = self.current_week_data.iloc[start_idx:end_idx, 2].values
-            lows = self.current_week_data.iloc[start_idx:end_idx, 3].values
-            closes = self.current_week_data.iloc[start_idx:end_idx, 4].values
-            
-            # Validate data ranges
-            if len(dates) == 0 or len(opens) == 0:
-                return
-            
-            # Plot candlesticks using proper indexing
-            for idx in range(len(dates)):
-                try:
-                    color = 'green' if closes[idx] >= opens[idx] else 'red'
-                    self.ax.plot(
-                        [dates[idx], dates[idx]],
-                        [lows[idx], highs[idx]],
-                        color=color,
-                        linewidth=1
-                    )
-                    self.ax.plot(
-                        [dates[idx], dates[idx]],
-                        [opens[idx], closes[idx]],
-                        color=color,
-                        linewidth=4
-                    )
-                except Exception as e:
-                    print(f"Error plotting candle {idx}: {str(e)}")
-                    continue
-        
-            # Plot only essential indicators for faster rendering
-            self.ax.plot(dates, self.current_week_data.iloc[start_idx:end_idx]['5EMA'].values, 
-                        color='blue', linewidth=1, label='5EMA')
-            self.ax.plot(dates, self.current_week_data.iloc[start_idx:end_idx]['144EMA'].values, 
-                        color='orange', linewidth=1, label='144EMA')
-            
-            # Add legend
-            self.ax.legend(loc='upper left')
-                
-            # Format x-axis with week info
-            week_info = self.weeks[self.current_week]
-            # Get current day name
-            day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            current_day = day_names[self.current_week_data.iloc[self.current_step, 0].weekday()]
-            
-            self.ax.set_title(
-                f"Week {week_info['number']} (Pass {self.week_passes + 1}/{self.required_passes}) | "
-                f"{week_info['start_date'].strftime('%Y-%m-%d')} to "
-                f"{week_info['end_date'].strftime('%Y-%m-%d')} | "
-                f"{current_day} | Step {self.current_step}"
-            )
-            self.ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%H:%M'))
-            self.fig.autofmt_xdate()
-            
-            plt.pause(0.0001)  # Optimized frame rate for faster rendering
-            
-        except Exception as e:
-            print(f"Error in rendering frame: {str(e)}")
-            return
-        
-    def close(self):
-        """Clean up visualization"""
-        plt.close(self.fig)
-
-if __name__ == "__main__":
-    # Create and run the environment
-    env = TradingDataEnv(
-        csv_path="data/test/TESTCOMMAFREEcleanedNQ1minCandleData.csv",
-        window_size=100
-    )
-    
-    observation, info = env.reset()
-    
-    for _ in range(50000):  # Run for 50,000 steps to ensure week transitions
-        action = 0  # No-op action
-        observation, reward, terminated, truncated, info = env.step(action)
-        
-        if terminated or truncated:
-            observation, info = env.reset()
-            
-    env.close()
+Install dependencies using pip:
+```bash
+pip install numpy pandas matplotlib gym torch os
 ```
+
+## File Structure
+```
+project/
+├── models/
+├── data/
+│   └── trading_data.csv
+├── rl_env_prototype.py
+└── README.md
+ * models/: Directory where trained models will be saved.
+ * data/trading_data.csv: CSV file containing the historical trading data.
+ * rl_env_prototype.py: Python file containing the TradingDataEnv class.
+ * README.md: Documentation file.
+```
+
+## Installation
+1. **Clone the Repository:**
+```bash
+git clone https://github.com/your-repo/trading-env.git
+cd trading-env
+```
+2. **Install Dependencies:**
+```bash
+pip install -r requirements.txt
+```
+3. **Prepare Data:**
+Ensure that the data/trading_data.csv file is present and contains the required columns (You will need to adjust the state space size if you use moore or different indicators:
+   
+   * Date
+   * Open
+   * High
+   * Low
+   * Close
+   * 5EMA
+   * 144EMA
+   * BOLLBU
+   * BOLLBM
+   * BOLLBL
+   
+
+## Usage
+**Initializing The Environment:**
+```python
+import gym
+from rl_env_prototype import TradingDataEnv
+
+# Initialize the environment
+env = TradingDataEnv(
+    csv_path='data/trading_data.csv',
+    window_size=50,
+    num_weeks=7  # Set to None to load all available weeks
+)
+```
+
+**Resetting the Environment:**
+```python
+# Reset the environment to start
+observation, info = env.reset()
+
+print("Initial Observation:", observation)
+print("Info:", info)
+```
+
+**Taking a Step in the Environment:**
+```python
+# Example of taking a step in the environment
+action = env.action_space.sample()  # Currently, only no-op (0) is available
+observation, reward, terminated, truncated, info = env.step(action)
+
+print("Next Observation:", observation)
+print("Reward:", reward)
+print("Terminated:", terminated)
+print("Truncated:", truncated)
+print("Info:", info)
+```
+
+**Rendering the Environment:**
+```python
+# Render the current state
+env.render()
+```
+
+**Closing the Environment:**
+```python
+# Clean up visualization
+env.close()
+```
+
+**Full Example**
+```python
+import gym
+from rl_env_prototype import TradingDataEnv
+
+# Initialize environment with specific parameters
+env = TradingDataEnv(csv_path='data/trading_data.csv', window_size=100, num_weeks=5)
+
+# Reset environment
+observation, info = env.reset()
+print("Initial Observation:", observation)
+print("Info:", info)
+
+done = False
+while not done:
+    # Select a random action (no-op)
+    action = env.action_space.sample()
+    
+    # Take action
+    observation, reward, terminated, truncated, info = env.step(action)
+    
+    # Render the environment
+    env.render()
+    
+    done = terminated or truncated
+
+env.close()
+```
+
+## Class: ```TradingDataEnv```
+**Initialization **
+```python
+def __init__(self, csv_path, window_size=50, num_weeks=None):
+    ...
+```
+ * Parameters:
+    * csv_path (str): Path to the CSV file containing trading data.
+    * window_size (int, optional): Number of data points to display in the visualization window. Default is 50.
+    * num_weeks (int, optional): Number of weeks of data to load. If None, all available weeks are loaded.
+
+**Methods**
+ * ```_load_and_process_weekly_data(csv_path)```
+    * Purpose: Loads and preprocesses weekly trading data from the specified CSV file.
+    * Returns: A list of dictionaries, each containing data for a specific week.
+    * Process:
+        * Reads the CSV file and parses dates.
+        * Sorts and resets the DataFrame index.
+        * Validates the presence of required columns.
+        * Defines exact week start and end dates.
+        * Filters data for each week and validates the number of observations.
+        * Appends weekly data to the weeks list.
+* ```_get_observation()```
+    * Purpose: Retrieves the current observation from the weekly data.
+    * Returns: A NumPy array containing 11 float features.
+    * Features Included:
+        * Market indicators (Open, High, Low, Close, 5EMA, 144EMA, BOLLBU, BOLLBM, BOLLBL)
+        * day_of_week: Integer representing the current day (0=Monday, 6=Sunday).
+        * week_progress: Float representing the progress through the current week (0.0-1.0).
+* ```reset(seed=None, options=None)```
+    * Purpose: Resets the environment to its initial state.
+    * Parameters:
+        * seed (int, optional): Seed for reproducibility.
+        * options (dict, optional): Additional options for resetting.
+        * Returns: A tuple containing the initial observation and an info dictionary.
+* ```step(action)```
+    * Purpose: Executes a step in the environment based on the provided action.
+    * Parameters:
+        * ```action```: The action to perform (currently only no-op is supported).
+        * Returns: A tuple containing the next observation, reward, termination flags, and an info dictionary.
+        * Process:
+            * Increments the current step.
+            * Checks if the week is completed and handles week transitions.
+            * Saves the model if the final week is completed.
+            * Updates the visualization by calling _render_frame().
+* ```_render_frame()```
+    * Purpose: Updates the visualization with the current candlestick chart and indicators.
+    * Process:
+        * Clears the existing plot.
+        * Retrieves a window of data based on ```window_size```.
+        * Plots candlesticks with color coding (green for up, red for down).
+        * Plots essential indicators (5EMA and 144EMA).
+        * Updates the plot title with week information and progress.
+        * Formats the x-axis with time data.
+* ```close()```
+    * Purpose: Cleans up and closes the visualization window.
+    * Process:
+        * Closes the Matplotlib figure.
+
+## Variables
+* ```self.weeks``` (list): List of weekly trading data loaded from the CSV.
+* ```self.current_week``` (int): Index of the current week being processed.
+* ```self.current_step``` (int): Index of the current step within the week.
+* ```self.current_week_data``` (DataFrame): Data for the current week.
+* ```self.observation_space``` (gym.spaces.Box): Defines the observation space with 11 float features.
+* ```self.action_space``` (gym.spaces.Discrete): Defines the action space, currently supporting only one action (no-op).
+* ```self.fig, self.ax``` (matplotlib.figure.Figure, matplotlib.axes.Axes): Matplotlib figure and axes for visualization.
+* ```self.window_size``` (int): Number of data points to display in the visualization window.
+* ```self.week_passes``` (int): Counter for the number of passes through the current week.
+* ```self.required_passes``` (int): Number of required passes through each week before advancing.
+* ```self.models_dir``` (str): Directory path where models are saved.
+
+
+## Example
+```python
+import gym
+from rl_env_prototype import TradingDataEnv
+
+# Initialize environment with specific parameters
+env = TradingDataEnv(csv_path='data/trading_data.csv', window_size=100, num_weeks=5)
+
+# Reset environment
+observation, info = env.reset()
+print("Initial Observation:", observation)
+print("Info:", info)
+
+done = False
+while not done:
+    # Select a random action (no-op)
+    action = env.action_space.sample()
+    
+    # Take action
+    observation, reward, terminated, truncated, info = env.step(action)
+    
+    # Render the environment
+    env.render()
+    
+    done = terminated or truncated
+
+env.close()
+```
+# Sample Output from the Usage
+![Figure_1](https://github.com/user-attachments/assets/85fbd000-2b21-46eb-94ac-d1b267d3a357)
+
+
+## Contributing
+Contributions are welcome! 
+If you have suggestions for improvements, bug fixes, or new features, please follow these steps:
+1. Fork the Repository
+2. Create a New Branch
+```bash
+git checkout -b feature/YourFeature
+```
+3. Commit your Changes
+```bash
+git commit -m "Add your feature"
+```
+4. Push to the Branch
+```bash
+git push origin feature/YourFeature
+``` 
+5. Open A pull Request
+
+    **Please ensure that your contributions adhere to the project's coding standards and include appropriate tests.**
+
+
+## References
+* [OpenAI Gymnasium Documentation](https://www.gymlibrary.ml/content/environment_creation/)
+* [Matplotlib Documentation](https://matplotlib.org/stable/contents.html)
+* [Pandas Documentation](https://pandas.pydata.org/docs/)
+* [NumPy Documentation](https://numpy.org/doc/)
+
+
 
